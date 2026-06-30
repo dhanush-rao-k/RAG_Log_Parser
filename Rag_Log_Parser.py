@@ -143,7 +143,23 @@ def main():
             get_log_count(collection)
         )
 
+        print(view_logs(collection))
+
+def view_logs(collection):
+
+    data = collection.get()
+
+    print("\nStored Logs:\n")
+
+    for i in range(len(data["ids"])):
+
+        print("=" * 50)
+        print("ID:", data["ids"][i])
+        print("\nMetadata:")
+        print(data["metadatas"][i])
+        print("\nDocument:")
+        print(data["documents"][i])
 
 if __name__ == "__main__":
     main()
-    
+
