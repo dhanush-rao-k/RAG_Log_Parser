@@ -153,15 +153,21 @@ def view_logs(collection):
 def build_system_prompt():
 
     return """
-You are an expert SOC (Security Operations Center) analyst.
+You are an experienced SOC analyst.
 
-Analyze the CURRENT log.
+You are given:
 
-If historical logs are provided, use them only as context.
+1. The CURRENT log.
 
-Determine whether the current log represents malicious activity.
+2. Similar historical logs retrieved from a vector database.
 
-If the activity is normal, state that no anomaly is detected.
+Your job is to determine whether the current log is malicious.
+
+Historical logs are context only.
+
+Do not simply repeat their classification.
+
+If the current log is normal, classify it as benign.
 
 Return ONLY valid JSON.
 
@@ -173,7 +179,6 @@ Return ONLY valid JSON.
     "recommendation":""
 }
 """
-
 def build_user_prompt(current_log, retrieved_logs):
 
     prompt = f"""
@@ -183,9 +188,9 @@ Current Log
 
 """
 
-    if retrieved_logs:
+    if len(retrieved_logs) > 0:
 
-        prompt += "\nRelevant Historical Logs\n\n"
+        prompt += "\nHistorical Similar Logs\n\n"
 
         for i, log in enumerate(retrieved_logs, start=1):
 
@@ -195,11 +200,20 @@ Current Log
 
             prompt += "\n\n"
 
+    else:
+
+        prompt += "\nNo similar historical logs found.\n\n"
+
     prompt += """
+Instructions
 
-Analyze ONLY the current log.
+1. Analyze ONLY the current log.
 
-Use the historical logs only for context.
+2. Historical logs are context only.
+
+3. Determine whether this represents malicious activity.
+
+4. If no anomaly exists, state that it is benign.
 
 Return ONLY JSON.
 
@@ -277,6 +291,16 @@ def analyze_with_rag(
         retrieved_logs
 ):
 
+    print("\nRetrieved Context\n")
+
+    for i, log in enumerate(retrieved_logs, start=1):
+
+        print(f"Similar Log {i}")
+
+        print(log)
+
+        print("-"*50)
+
     system_prompt = build_system_prompt()
 
     user_prompt = build_user_prompt(
@@ -292,6 +316,78 @@ def analyze_with_rag(
     result = parse_output(response)
 
     print_output(result)
+
+def retrieve_context(
+        collection,
+        embedding,
+        metadata,
+        top_k=3
+):
+
+    where_clause = {}
+
+    if metadata["src_ip"] != "unknown":
+        where_clause["src_ip"] = metadata["src_ip"]
+
+    if metadata["dst_ip"] != "unknown":
+        where_clause["dst_ip"] = metadata["dst_ip"]
+
+    if metadata["port"] != "unknown":
+        where_clause["port"] = metadata["port"]
+
+    try:
+
+        if len(where_clause) > 0:
+
+            results = collection.query(
+
+                query_embeddings=[embedding],
+
+                n_results=top_k + 1,
+
+                where=where_clause
+
+            )
+
+        else:
+
+            results = collection.query(
+
+                query_embeddings=[embedding],
+
+                n_results=top_k + 1
+
+            )
+
+    except:
+
+        results = collection.query(
+
+            query_embeddings=[embedding],
+
+            n_results=top_k + 1
+
+        )
+
+    retrieved_logs = []
+
+    documents = results["documents"][0]
+
+    distances = results["distances"][0]
+
+    for doc, distance in zip(documents, distances):
+
+        if distance < 0.00001:
+            continue
+
+        retrieved_logs.append(doc)
+
+        if len(retrieved_logs) == top_k:
+            break
+
+    return retrieved_logs
+
+
 
 def main():
 
@@ -334,9 +430,6 @@ def main():
                 log,
                 retrieved_logs
             )
-
-        print("\nStored Logs\n")
-        view_logs(collection)
 
         print("\n" + "=" * 60 + "\n")
 
